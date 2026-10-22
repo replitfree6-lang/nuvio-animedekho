@@ -199,9 +199,11 @@ function sleep(ms) {
 // HTTP helpers (NiceHttp Requests equivalents)
 // ---------------------------------------------------------------------------
 
-// Requests carry a 30s timeout, like a standard HTTP client (OkHttp/NiceHttp
-// in the original app); without it a single dead host could hang getStreams.
-const HTTP_TIMEOUT_MS = 30000;
+// Requests carry a timeout, like a standard HTTP client (OkHttp/NiceHttp in
+// the original app); without it a single dead host could hang getStreams.
+// 12s (lowered from 30s during conversion): Nuvio kills scrapers that run
+// too long, and several extractor hosts hang rather than refuse.
+const HTTP_TIMEOUT_MS = 12000;
 
 function timeoutSignal(ms) {
     try {
@@ -1837,18 +1839,26 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
     if (title == null) return null;
     const results = await searchSite(MAIN_URL, title);
     if (!results.length) return null;
+    // Load the candidate posts in parallel (was sequential): same selection
+    // as the original order-based scan — first TMDB match wins, otherwise
+    // the first post that loads — but without paying a serial page fetch
+    // per result, which pushed total runtime past Nuvio's scraper limit.
+    const capped = results.slice(0, 8);
+    const loadedList = await Promise.all(
+        capped.map((r) => loadPost(MAIN_URL, { url: r.url, poster: r.poster }))
+    );
     let chosen = null;
     let loaded = null;
-    for (const r of results) {
-        const l = await loadPost(MAIN_URL, { url: r.url, poster: r.poster });
+    for (let idx = 0; idx < loadedList.length; idx++) {
+        const l = loadedList[idx];
         if (!l) continue;
         if (l.tmdbId != null && String(l.tmdbId) === String(tmdbId)) {
-            chosen = r;
+            chosen = capped[idx];
             loaded = l;
             break;
         }
         if (chosen == null) {
-            chosen = r;
+            chosen = capped[idx];
             loaded = l;
         }
     }
@@ -1859,13 +1869,15 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
             title: loaded.title,
         };
     }
-    const s = season != null ? season : 1;
-    const e = episode != null ? episode : 1;
+    // Nuvio may hand season/episode as strings; the season list and the
+    // episode numbers are numeric, so coerce before comparing.
+    const s = season != null && !isNaN(parseInt(season, 10)) ? parseInt(season, 10) : 1;
+    const e = episode != null && !isNaN(parseInt(episode, 10)) ? parseInt(episode, 10) : 1;
     if (!loaded.seasons.includes(s)) return null;
     const eps = await fetchEpisodes(MAIN_URL, loaded.postId, s);
     let ep = null;
     for (const candidate of eps) {
-        if (candidate.episode === e) {
+        if (Number(candidate.episode) === e) {
             ep = candidate;
             break;
         }

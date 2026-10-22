@@ -2,22 +2,24 @@
 
 A Nuvio plugin repository converted from **AnimeDekhoProvider.cs3**
 (CloudStream3 plugin, version 72, by **phisher98**). Nothing from the
-original plugin was dropped: every provider and every extractor registered
-in the original `AnimeDekhoPlugin.load()` is ported, in the original
-registration order. Where CloudStream has a feature that a stream-only
-Nuvio plugin cannot express, that is stated openly below instead of being
-silently removed.
+original AnimeDekho provider was dropped: its full provider logic and
+every extractor it registers are ported, in the original registration
+order. Where CloudStream has a feature that a stream-only Nuvio plugin
+cannot express, that is stated openly below instead of being silently
+removed.
+
+> This repository ships only the **Anime Dekho** scraper. The .cs3 also
+> contained HindiSubAnime and OnePace providers; their conversions were
+> removed from this repository on 2026-10-22 at the user's request.
 
 Support the original author: https://buymeacoffee.com/phisher98 ·
 GitHub: https://github.com/phisher98
 
-## Scrapers in this repository
+## Scraper in this repository
 
 | Scraper | Site | Types | Language |
 | --- | --- | --- | --- |
 | Anime Dekho | https://animedekho.tv | movie, tv | hi |
-| HindiSubAnime | https://hindisubanime.co | movie, tv | hi |
-| OnePace | https://onepace.co | tv | en |
 
 ## How Nuvio plugins work
 
@@ -36,15 +38,16 @@ GitHub: https://github.com/phisher98
 
 ## Install
 
-1. Host this folder somewhere reachable over HTTPS (for example a GitHub
-   repository), so that `manifest.json` has a public raw URL.
-2. In Nuvio, open the Plugins screen and add a repository using that
-   `manifest.json` URL.
-3. Enable the scrapers you want (Anime Dekho, HindiSubAnime, OnePace).
+1. In Nuvio, open the Plugins screen and add a repository using this
+   repo's raw `manifest.json` URL:
+   `https://raw.githubusercontent.com/replitfree6-lang/nuvio-animedekho/main/manifest.json`
+2. Enable the **Anime Dekho** scraper.
+3. After an update, refresh the repository in Nuvio so it picks up the
+   new scraper version.
 
 ## What was converted
 
-### Providers (CloudStream `MainAPI`s → Nuvio scrapers)
+### Provider (CloudStream `MainAPI` → Nuvio scraper)
 
 - **AnimeDekhoProvider** — full port: DGT suggest search with the HTML
   search fallback, `load()` snapshot parsing (title/poster/backdrop/plot,
@@ -54,11 +57,6 @@ GitHub: https://github.com/phisher98
   fallback), embed and download source handling (including the
   `/player.php?url=` iframe unwrap and the `dl2.php` Base64 decode), and
   `extractLabeled` server/quality/tag renaming.
-- **HindiSubAnime** — inherits AnimeDekho's search/load in the original;
-  its own `loadLinks` (page iframes + the `trdekho` 0–7 server fan-out) is
-  ported unchanged.
-- **OnepaceProvider** — its arc catalogue, search and `load()` are ported,
-  and its `loadLinks` uses the same `trdekho` fan-out.
 
 ### Extractors (original registration order)
 
@@ -83,16 +81,16 @@ behaviour so `loadExtractor()` routes exactly like CloudStream.
 ## Platform differences (nothing silently omitted)
 
 - **Catalogue / home page / search / metadata UI** — CloudStream shows
-  the providers' main pages (Recently Added, Popular, Top Rated, genre
+  the provider's main pages (Recently Added, Popular, Top Rated, genre
   categories, etc.), search results and detail pages. Nuvio plugins are
   stream-only, so there is no surface for these. The same search/load
   logic is still present and is used internally to resolve the TMDB id
   Nuvio hands the scraper into the site's post/episode before extracting
   streams.
 - **TMDB resolution step** — CloudStream starts from the site's own
-  pages; Nuvio hands the scraper only a TMDB id. The scrapers therefore
-  look the title up on TMDB first, then run the original site search/load
-  flow and prefer the result whose snapshot TMDB id matches.
+  pages; Nuvio hands the scraper only a TMDB id. The scraper therefore
+  looks the title up on TMDB first, then runs the original site
+  search/load flow and prefers the result whose snapshot TMDB id matches.
 - **Donation popup** — the `.cs3` contains an Android donation dialog
   (`DonationManager` / `DonationDialogFragment`) driven by
   `https://raw.githubusercontent.com/phisher98/TVVVV/main/goal.json` and
@@ -100,43 +98,36 @@ behaviour so `loadExtractor()` routes exactly like CloudStream.
   https://buymeacoffee.com/phisher98 and https://github.com/phisher98.
   A stream-only JavaScript plugin has no UI, so the popup itself cannot
   exist in Nuvio; the author's support links are preserved here and in
-  each file's header comment instead.
+  the file's header comment instead.
 - **Subtitles** — CloudStream delivers subtitles through a separate
-  callback; Nuvio attaches them to the stream object, which is what these
-  scrapers do.
-- **HTTP timeout** — the shared HTTP helpers use a 30-second timeout (a
-  client-platform safeguard added during conversion after a live host
-  hung indefinitely). This does not change any extraction logic.
+  callback; Nuvio attaches them to the stream object, which is what this
+  scraper does.
 
-## Site-drift fallbacks (conversion additions, clearly marked in code)
+## Conversion adjustments (clearly marked in code)
 
-The original logic runs first and unchanged in every case; these fallbacks
-only fire when the original flow finds nothing because a site has been
-rebuilt since the `.cs3` was released:
-
-- **OnePace** — onepace.co now runs the same DGT system as animedekho.tv
-  and no longer has the arc-box markup the original `load()` parses. If
-  arc-box resolution finds nothing, the episode is resolved through the
-  site's DGT episodes API instead; the original `trdekho` `loadLinks`
-  then runs unchanged.
+- **Argument coercion** — Nuvio can hand `season`/`episode` to
+  `getStreams` as strings while the site's season/episode data is
+  numeric; they are coerced to numbers before comparison. (Without this,
+  series requests returned no streams in the app.)
+- **Parallel candidate loading** — the TMDB-match scan loads candidate
+  posts in parallel instead of one page fetch at a time; the selection
+  result is identical, the runtime is much lower.
+- **HTTP timeout** — requests time out after 12 seconds: several
+  extractor hosts hang rather than refuse, and Nuvio kills scrapers that
+  run too long.
 - **StreamRuby** — rubystm.com now serves its player script Dean Edwards
-  packed, so the original `file:"…"` pattern only exists after unpacking;
-  the extractor retries on the unpacked script when the plain pattern
-  finds nothing.
-- **HindiSubAnime** — hindisubanime.co no longer runs the DGT system (its
-  suggest route answers 404), but its episode pages still carry the
-  `term-<id>` body class and still answer the `trdekho` fan-out. If the
-  original DGT resolution finds nothing, the episode is resolved from the
-  theme's `/epi/<slug>-<season>x<episode>/` links on the series page;
-  the original `loadLinks` then runs unchanged.
+  packed, so the original `file:"…"` pattern only exists after
+  unpacking; the extractor retries on the unpacked script when the plain
+  pattern finds nothing. The original pattern still runs first.
 
 ## Validation (live, 22 Oct 2026)
 
-- Anime Dekho — One Piece S1E1: 16 streams; Your Name (movie): 13 streams
-  (full gate-bypass path exercised); Shinchan S1E1: 10 streams (NeoCDN,
-  HydraX/Abyss, SRuby, Vidmoly — the site's own source list for that
-  episode is VidStreamm [hidden by the site itself], HydraX, NeoCDN,
-  SRuby, Vidstream).
-- HindiSubAnime — One Piece S1E1: 5 streams; Naruto S1E1: 4 streams.
-- OnePace — One Piece S1E1: 8 streams (sub + dub).
-- All three files pass `node --check`; `manifest.json` is valid JSON.
+Tested by calling `getStreams` exactly the way Nuvio does (including with
+string season/episode arguments):
+
+- One Piece S1E1: 17 streams in ~26 s (NeoCDN, HydraX/Abyss, SRuby,
+  Vidmoly, Vidstream).
+- Shinchan S1E1: 10 streams in ~20 s (NeoCDN, HydraX/Abyss, SRuby,
+  Vidmoly — the site's own source list for that episode is VidStreamm
+  [hidden by the site itself], HydraX, NeoCDN, SRuby, Vidstream).
+- Your Name (movie): 13 streams (full gate-bypass path exercised).
