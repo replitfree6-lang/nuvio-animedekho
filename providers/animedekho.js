@@ -1339,6 +1339,49 @@ function tmdbTitle(details, mediaType) {
     return details.name || details.original_name || null;
 }
 
+// All the names TMDB knows the title by: primary, original, and the
+// alternative-titles list. TMDB's primary name is not stable (TMDB id
+// 30623 answered both "Shin Chan" and "Crayon Shin-chan" on the same day),
+// and the site indexes posts under its own variants, so resolution
+// searches with several of these.
+async function tmdbTitles(tmdbId, mediaType, details) {
+    const titles = [];
+    const add = (t) => {
+        if (!isBlank(t) && !titles.includes(t)) titles.push(t);
+    };
+    if (details) {
+        if (mediaType === "movie") {
+            add(details.title);
+            add(details.original_title);
+        } else {
+            add(details.name);
+            add(details.original_name);
+        }
+    }
+    try {
+        const kind = mediaType === "movie" ? "movie" : "tv";
+        const res = await fetch("https://api.themoviedb.org/3/" + kind + "/" + tmdbId + "/alternative_titles?api_key=" + TMDB_API_KEY, { signal: timeoutSignal(HTTP_TIMEOUT_MS) });
+        if (res.ok) {
+            const j = await res.json();
+            const arr = (j && (j.titles || j.results)) || [];
+            const alt = [];
+            for (const t of arr) {
+                const v = t && (t.title || t.name);
+                if (!isBlank(v) && !alt.includes(v)) alt.push(v);
+            }
+            // The site indexes English/Latin titles; non-Latin alternatives
+            // (Cyrillic, CJK, ...) cannot match anything there, so Latin
+            // alternatives go first.
+            const isLatin = (s) => !/[^\u0000-\u024F]/.test(s);
+            for (const v of alt.filter(isLatin)) add(v);
+            for (const v of alt.filter((s) => !isLatin(s))) add(v);
+        }
+    } catch (e) {
+        // alternatives are best-effort; primary/original still apply
+    }
+    return titles.slice(0, 10);
+}
+
 // AnimeDekhoProvider.toSearchResult(a.dgt-card)
 function cardToSearchResult($, card) {
     const href = $(card).attr("href");
@@ -1367,7 +1410,7 @@ async function searchSite(mainUrl, query) {
         suggestions = [];
         for (const item of items) {
             if (item == null || isBlank(item.url) || isBlank(item.title)) continue;
-            suggestions.push({ url: item.url, poster: item.poster != null ? item.poster : null, title: item.title });
+            suggestions.push({ url: item.url, poster: item.poster != null ? item.poster : null, title: item.title, type: item.type != null ? item.type : null });
         }
     } catch (e) {
         console.error("AnimeDekho: Suggest search failed: " + e);
@@ -1446,6 +1489,137 @@ async function loadPost(mainUrl, media) {
         if (rawTabs) {
             try {
                 const arr = JSON.parse(rawTabs);
+                if (Array.isArray(arr)) {
+                    for (const o of arr) {
+                        if (o && typeof o.season === "number" && o.season > 0 && !seasons.includes(o.season)) {
+                            seasons.push(o.season);
+                        }
+                    }
+                    seasons.sort((a, b) => a - b);
+                }
+            } catch (e) {
+                // malformed data-tabs — no seasons, like the original's runCatching
+            }
+        }
+    }
+    return {
+        title: title,
+        type: snapshot && snapshot.type != null ? snapshot.type : null,
+        poster: poster != null ? poster : null,
+        backdrop: backdrop != null ? backdrop : null,
+        plot: plot,
+        year: year != null ? year : null,
+        genres: genres != null ? genres : null,
+        tmdbId: tmdbId,
+        malId: malId,
+        anilistId: anilistId,
+        postId: postId,
+        seasons: seasons,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// loadPostFast: the same fields load() extracts, read with plain string
+// scans instead of a full DOM parse. The resolution path uses this: TV-class
+// hardware (e.g. webOS) is slow at building DOMs over ~300 KB pages, and the
+// fields needed (snapshot JSON, season tabs, external-id buttons) are all
+// single attributes or anchors. It also keeps resolution working on hosts
+// where the cheerio module is unavailable.
+// ---------------------------------------------------------------------------
+
+function htmlUnescape(s) {
+    return String(s)
+        .split("&quot;").join("\"")
+        .split("&#039;").join("'")
+        .split("&#39;").join("'")
+        .split("&apos;").join("'")
+        .split("&lt;").join("<")
+        .split("&gt;").join(">")
+        .split("&amp;").join("&");
+}
+
+function rawAttr(html, attr) {
+    const m = new RegExp(attr + "=\"([^\"]*)\"").exec(html);
+    return m ? htmlUnescape(m[1]) : null;
+}
+
+function metaContent(html, prop) {
+    const tags = html.match(/<meta[^>]*>/g) || [];
+    for (const tag of tags) {
+        if (tag.includes("property=\"" + prop + "\"") || tag.includes("property='" + prop + "'")) {
+            const m = /content="([^"]*)"/.exec(tag) || /content='([^']*)'/.exec(tag);
+            if (m) return htmlUnescape(m[1]);
+        }
+    }
+    return null;
+}
+
+function extIdFromHtml(html, btnClass, re) {
+    const tagRe = /<a[^>]*>/g;
+    let t;
+    while ((t = tagRe.exec(html)) != null) {
+        if (!t[0].includes(btnClass)) continue;
+        const hm = /href="([^"]*)"/.exec(t[0]) || /href='([^']*)'/.exec(t[0]);
+        if (!hm) return null;
+        const m = re.exec(htmlUnescape(hm[1]));
+        return m ? toIntOrNull(m[1]) : null;
+    }
+    return null;
+}
+
+async function loadPostFast(mainUrl, media) {
+    let html = null;
+    try {
+        html = await httpGetText(media.url, {});
+    } catch (e) {
+        return null;
+    }
+    if (!html) return null;
+    let snapshot = null;
+    const snapRaw = rawAttr(html, "data-snapshot");
+    if (snapRaw) {
+        try { snapshot = JSON.parse(snapRaw); } catch (e) { snapshot = null; }
+    }
+    let title = snapshot && !isBlank(snapshot.title) ? snapshot.title : null;
+    if (title == null) {
+        const m = /<span[^>]*class="[^"]*dgt-titletext[^"]*"[^>]*>([^<]*)</.exec(html);
+        if (m && !isBlank(m[1].trim())) title = m[1].trim();
+    }
+    if (title == null) {
+        const m = /<div[^>]*class="[^"]*dgt-muted[^"]*"[^>]*>([^<]*)</.exec(html);
+        if (m && !isBlank(m[1].trim())) title = m[1].trim();
+    }
+    if (title == null) {
+        const og = metaContent(html, "og:title");
+        title = !isBlank(og) ? og : "No Title";
+    }
+    const poster = snapshot && snapshot.poster != null ? snapshot.poster : media.poster;
+    const backdrop = snapshot ? snapshot.backdrop : null;
+    let plot = null;
+    const pm = /<p[^>]*class="[^"]*dgt-overview[^"]*"[^>]*>([\s\S]*?)<\/p>/.exec(html);
+    if (pm) {
+        const txt = pm[1].split(/<[^>]*>/).join("").trim();
+        if (!isBlank(txt)) plot = txt;
+    }
+    if (plot == null) plot = metaContent(html, "og:description");
+    const year = snapshot ? snapshot.year : null;
+    const genres = snapshot ? snapshot.genres : null;
+    const tmdbId = extIdFromHtml(html, "dgt-ext__btn--tmdb", /themoviedb\.org\/(?:tv|movie)\/(\d+)/);
+    const malId = extIdFromHtml(html, "dgt-ext__btn--mal", /myanimelist\.net\/anime\/(\d+)/);
+    const anilistId = extIdFromHtml(html, "dgt-ext__btn--anilist", /anilist\.co\/anime\/(\d+)/);
+    let postId = snapshot && snapshot.id != null ? snapshot.id : null;
+    if (postId == null) {
+        const ds = /\bdata-series="(\d+)"/.exec(html);
+        if (ds) postId = toIntOrNull(ds[1]);
+    }
+    const seasons = [];
+    const tabsIdx = html.indexOf("id=\"dgt-season-tabs\"");
+    if (tabsIdx !== -1) {
+        const dtIdx = html.indexOf("data-tabs=\"", tabsIdx);
+        const dtEnd = dtIdx !== -1 ? html.indexOf("\"", dtIdx + 11) : -1;
+        if (dtIdx !== -1 && dtEnd !== -1) {
+            try {
+                const arr = JSON.parse(htmlUnescape(html.slice(dtIdx + 11, dtEnd)));
                 if (Array.isArray(arr)) {
                     for (const o of arr) {
                         if (o && typeof o.season === "number" && o.season > 0 && !seasons.includes(o.season)) {
@@ -1846,13 +2020,21 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
     const title = tmdbTitle(details, mediaType);
     if (title == null) return null;
     // Gather candidates from the suggest search. The site indexes some
-    // series under a squashed title ("Shinchan") while TMDB uses the
-    // spaced one ("Shin Chan"), and for the spaced query suggest returns
-    // ONLY same-franchise movies — so the squashed variant is searched
-    // too and the results merged.
-    const queries = [title];
-    const squashed = String(title).replace(/\s+/g, "");
-    if (squashed && squashed !== title) queries.push(squashed);
+    // series under a squashed title ("Shinchan") while TMDB uses spaced
+    // or franchised ones ("Shin Chan", "Crayon Shin-chan"-style variants
+    // — TMDB's own primary name for the same id is not stable), and for
+    // some queries suggest returns ONLY same-franchise movies — so every
+    // known title variant is searched, each also in squashed form, and
+    // the results merged.
+    const titles = await tmdbTitles(tmdbId, mediaType, details);
+    const queries = [];
+    for (const t of titles) {
+        if (queries.length >= 8) break;
+        if (!queries.includes(t)) queries.push(t);
+        const squashed = String(t).replace(/[^a-zA-Z0-9]+/g, "");
+        if (squashed && squashed !== t && !queries.includes(squashed) && queries.length < 8) queries.push(squashed);
+    }
+    if (!queries.length) queries.push(title);
     const seenUrls = {};
     let results = [];
     for (const q of queries) {
@@ -1867,23 +2049,50 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
     if (!results.length) return null;
     const norm = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
     const wantSeries = mediaType !== "movie";
-    // Load candidates in parallel (a serial page fetch per result pushed
-    // total runtime past Nuvio's scraper limit) and classify them.
-    const loadPool = async (list) => {
-        const capped = list.slice(0, 24);
-        const loadedList = await Promise.all(
-            capped.map((r) => loadPost(MAIN_URL, { url: r.url, poster: r.poster }))
-        );
-        const out = [];
-        for (let idx = 0; idx < loadedList.length; idx++) {
-            const l = loadedList[idx];
-            if (!l) continue;
-            const isSeries = l.type === "series" || (l.seasons != null && l.seasons.length > 0);
-            out.push({ r: capped[idx], l: l, isSeries: isSeries });
+    const titleNorms = titles.map((t) => norm(t));
+    const byTmdb = (arr) => arr.find((p) => p.l.tmdbId != null && String(p.l.tmdbId) === String(tmdbId));
+    const byTitle = (arr) => arr.find((p) => titleNorms.includes(norm(p.l.title)));
+    // Load candidates in small batches, most-likely first (the suggest API
+    // already reports each item's type), and stop as soon as the pick is
+    // certain. TV-class hardware is far slower than a phone at fetching
+    // and scanning dozens of post pages, and Nuvio kills slow scrapers —
+    // most titles resolve from the first batch alone. Pages are read with
+    // loadPostFast (string scans, no DOM parse) for the same reason.
+    const loadBatched = async (list) => {
+        const rank = (r) => {
+            if (r.type == null) return 1;
+            return (r.type === "series") === wantSeries ? 0 : 2;
+        };
+        const ordered = list.slice(0, 24).map((r, i) => ({ r: r, i: i }))
+            .sort((a, b) => (rank(a.r) - rank(b.r)) || (a.i - b.i))
+            .map((x) => x.r);
+        const totalByRank = [0, 0, 0];
+        for (const r of ordered) totalByRank[rank(r)]++;
+        const loadedByRank = [0, 0, 0];
+        const loaded = [];
+        // One retry per page: a transient fetch failure on the right post
+        // must not let a same-franchise spin-off win the fallback pick.
+        const loadWithRetry = async (r) => {
+            const first = await loadPostFast(MAIN_URL, { url: r.url, poster: r.poster });
+            return first != null ? first : loadPostFast(MAIN_URL, { url: r.url, poster: r.poster });
+        };
+        for (let start = 0; start < ordered.length; start += 3) {
+            const batch = ordered.slice(start, start + 3);
+            const batchLoaded = await Promise.all(batch.map(loadWithRetry));
+            for (let j = 0; j < batch.length; j++) {
+                loadedByRank[rank(batch[j])]++;
+                const l = batchLoaded[j];
+                if (!l) continue;
+                const isSeries = l.type === "series" || (l.seasons != null && l.seasons.length > 0);
+                loaded.push({ r: batch[j], l: l, isSeries: isSeries });
+            }
+            const poolNow = loaded.filter((p) => p.isSeries === wantSeries);
+            if (byTmdb(poolNow) || byTitle(poolNow)) break;
+            if (poolNow.length && loadedByRank[0] >= totalByRank[0] && loadedByRank[1] >= totalByRank[1]) break;
         }
-        return out;
+        return loaded;
     };
-    let all = await loadPool(results);
+    let all = await loadBatched(results);
     let pool = all.filter((p) => p.isSeries === wantSeries);
     if (!pool.length) {
         // Last resort: the original search's HTML fallback page, which is
@@ -1901,7 +2110,7 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
             });
         }
         if (extra.length) {
-            const extraLoaded = await loadPool(extra);
+            const extraLoaded = await loadBatched(extra);
             all = all.concat(extraLoaded);
             pool = all.filter((p) => p.isSeries === wantSeries);
         }
@@ -1914,9 +2123,7 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
     // then exact normalised-title match, then the first candidate of the
     // requested type; cross-type posts are only used on an exact TMDB or
     // title match.
-    const byTmdb = (arr) => arr.find((p) => p.l.tmdbId != null && String(p.l.tmdbId) === String(tmdbId));
-    const byTitle = (arr) => arr.find((p) => norm(p.l.title) === norm(title));
-    const pick = byTmdb(pool) || byTitle(pool) || pool[0] || byTmdb(all) || byTitle(all) || null;
+    const pick = byTmdb(pool) || byTitle(pool) || byTmdb(all) || pool[0] || byTitle(all) || null;
     if (pick == null) return null;
     const chosen = pick.r;
     const loaded = pick.l;

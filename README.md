@@ -112,14 +112,22 @@ behaviour so `loadExtractor()` routes exactly like CloudStream.
 - **Type-safe title resolution** — Nuvio hands the scraper only a TMDB
   id, and the site's suggest search can miss the series entirely (for
   "Shin Chan" it returns only same-franchise movies; the series is
-  indexed as "Shinchan"). The resolver therefore also searches the
-  squashed title, and only ever resolves a tv request to a series post
-  and a movie request to a movie post (exact TMDB-id or title matches
-  aside). An earlier version fell back to the first loaded post, which
-  made series requests play a movie.
-- **Parallel candidate loading** — the TMDB-match scan loads candidate
-  posts in parallel instead of one page fetch at a time, keeping the
-  runtime well within Nuvio's scraper limits.
+  indexed as "Shinchan"). TMDB's own primary name for an id is not
+  stable either (id 30623 has answered both "Shin Chan" and "Crayon
+  Shin-chan" on the same day — the latter would resolve to the spin-off
+  series). The resolver therefore searches with the primary name, the
+  original name and TMDB's alternative titles (Latin ones first), each
+  also in squashed form, and only ever resolves a tv request to a series
+  post and a movie request to a movie post (exact TMDB-id or title
+  matches aside). An earlier version fell back to the first loaded post,
+  which made series requests play a movie.
+- **Low-end / TV hardware** — TVs (e.g. LG webOS) are far slower than
+  phones, and Nuvio kills slow scrapers, which showed up as "no streams
+  on TV, fine on phone". Candidate posts are now loaded in small
+  prioritised batches with early exit, and pages are read with plain
+  string scans (snapshot JSON, season tabs and id buttons are single
+  attributes) instead of building a DOM over each ~300 KB page.
+  Resolution also no longer depends on the cheerio module being present.
 - **HTTP timeout** — requests time out after 12 seconds: several
   extractor hosts hang rather than refuse, and Nuvio kills scrapers that
   run too long.
