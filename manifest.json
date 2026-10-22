@@ -23,7 +23,27 @@
         "tv"
       ],
       "version": "1.0.3"
+    },
+    {
+      "id": "tvdiag",
+      "name": "TV Diagnostic (temporary)",
+      "description": "Temporary diagnostic scraper: reports which runtime/network stage fails on TVs that return no Anime Dekho streams. Not a content provider; safe to disable or ignore.",
+      "version": "1.0.0",
+      "author": "Muse (diagnostic)",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/tvdiag.js",
+      "enabled": true,
+      "formats": [
+        "m3u8"
+      ],
+      "contentLanguage": [
+        "en"
+      ],
+      "hasSettings": false
     }
   ],
-  "version": "1.0.3"
+  "version": "1.0.4"
 }
