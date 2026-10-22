@@ -1,1 +1,29 @@
-{"name":"AnimeDekho (Converted from CloudStream)","scrapers":[{"author":"phisher98","contentLanguage":["hi"],"description":"Anime Dekho (animedekho.tv) - Hindi dubbed anime, cartoons and movies. Converted 1:1 from AnimeDekhoProvider.cs3 (CloudStream3 plugin v72 by phisher98), including the DGT watch API, ad-gate bypass and all registered extractors.","enabled":true,"filename":"providers/animedekho.js","formats":["m3u8","mp4","mkv"],"hasSettings":false,"id":"animedekho","logo":"https://www.google.com/s2/favicons?domain=animedekho.tv&sz=128","name":"Anime Dekho","supportedTypes":["movie","tv"],"version":"1.0.1"}],"version":"1.0.1"}
+{
+  "name": "AnimeDekho (Converted from CloudStream)",
+  "scrapers": [
+    {
+      "author": "phisher98",
+      "contentLanguage": [
+        "hi"
+      ],
+      "description": "Anime Dekho (animedekho.tv) - Hindi dubbed anime, cartoons and movies. Converted 1:1 from AnimeDekhoProvider.cs3 (CloudStream3 plugin v72 by phisher98), including the DGT watch API, ad-gate bypass and all registered extractors.",
+      "enabled": true,
+      "filename": "providers/animedekho.js",
+      "formats": [
+        "m3u8",
+        "mp4",
+        "mkv"
+      ],
+      "hasSettings": false,
+      "id": "animedekho",
+      "logo": "https://www.google.com/s2/favicons?domain=animedekho.tv&sz=128",
+      "name": "Anime Dekho",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "version": "1.0.2"
+    }
+  ],
+  "version": "1.0.2"
+}

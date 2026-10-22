@@ -535,8 +535,14 @@ async function voeGetUrl(inst, url, referer, emit, emitSub) {
 // StreamRuby (DEX) — mainUrl https://rubystm.com
 async function streamRubyGetUrl(inst, url, referer, emit, emitSub) {
     const cleanedUrl = String(url).split("/e").join("");
+    // Conversion fix: streamruby binds its playlist token to the exact
+    // User-Agent that fetched the player page (verified live: same UA ->
+    // 200, any other UA -> 403). In CloudStream the scraper and the player
+    // share one HTTP stack UA, so the original never had to pin it; in
+    // Nuvio they differ, so the page is fetched with DESKTOP_UA and the
+    // same UA is sent to the player in the link headers below.
     const $ = await httpGetDoc(cleanedUrl, {
-        headers: { "X-Requested-With": "XMLHttpRequest" },
+        headers: { "X-Requested-With": "XMLHttpRequest", "User-Agent": DESKTOP_UA },
     });
     if (!$) return;
     // jsoup: selectFirst("script:containsData(vplayer)")
@@ -548,6 +554,7 @@ async function streamRubyGetUrl(inst, url, referer, emit, emitSub) {
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "cross-site",
         "Origin": cleanedUrl,
+        "User-Agent": DESKTOP_UA,
     };
     let m = /file:"(.*)"/.exec(data);
     if (!m) {
@@ -1454,6 +1461,7 @@ async function loadPost(mainUrl, media) {
     }
     return {
         title: title,
+        type: snapshot && snapshot.type != null ? snapshot.type : null,
         poster: poster != null ? poster : null,
         backdrop: backdrop != null ? backdrop : null,
         plot: plot,
@@ -1837,32 +1845,81 @@ async function resolveMedia(tmdbId, mediaType, season, episode) {
     const details = await tmdbDetails(tmdbId, mediaType);
     const title = tmdbTitle(details, mediaType);
     if (title == null) return null;
-    const results = await searchSite(MAIN_URL, title);
-    if (!results.length) return null;
-    // Load the candidate posts in parallel (was sequential): same selection
-    // as the original order-based scan — first TMDB match wins, otherwise
-    // the first post that loads — but without paying a serial page fetch
-    // per result, which pushed total runtime past Nuvio's scraper limit.
-    const capped = results.slice(0, 8);
-    const loadedList = await Promise.all(
-        capped.map((r) => loadPost(MAIN_URL, { url: r.url, poster: r.poster }))
-    );
-    let chosen = null;
-    let loaded = null;
-    for (let idx = 0; idx < loadedList.length; idx++) {
-        const l = loadedList[idx];
-        if (!l) continue;
-        if (l.tmdbId != null && String(l.tmdbId) === String(tmdbId)) {
-            chosen = capped[idx];
-            loaded = l;
-            break;
-        }
-        if (chosen == null) {
-            chosen = capped[idx];
-            loaded = l;
+    // Gather candidates from the suggest search. The site indexes some
+    // series under a squashed title ("Shinchan") while TMDB uses the
+    // spaced one ("Shin Chan"), and for the spaced query suggest returns
+    // ONLY same-franchise movies — so the squashed variant is searched
+    // too and the results merged.
+    const queries = [title];
+    const squashed = String(title).replace(/\s+/g, "");
+    if (squashed && squashed !== title) queries.push(squashed);
+    const seenUrls = {};
+    let results = [];
+    for (const q of queries) {
+        const rs = await searchSite(MAIN_URL, q);
+        for (const r of rs) {
+            if (r && r.url && !seenUrls[r.url]) {
+                seenUrls[r.url] = true;
+                results.push(r);
+            }
         }
     }
-    if (loaded == null) return null;
+    if (!results.length) return null;
+    const norm = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const wantSeries = mediaType !== "movie";
+    // Load candidates in parallel (a serial page fetch per result pushed
+    // total runtime past Nuvio's scraper limit) and classify them.
+    const loadPool = async (list) => {
+        const capped = list.slice(0, 24);
+        const loadedList = await Promise.all(
+            capped.map((r) => loadPost(MAIN_URL, { url: r.url, poster: r.poster }))
+        );
+        const out = [];
+        for (let idx = 0; idx < loadedList.length; idx++) {
+            const l = loadedList[idx];
+            if (!l) continue;
+            const isSeries = l.type === "series" || (l.seasons != null && l.seasons.length > 0);
+            out.push({ r: capped[idx], l: l, isSeries: isSeries });
+        }
+        return out;
+    };
+    let all = await loadPool(results);
+    let pool = all.filter((p) => p.isSeries === wantSeries);
+    if (!pool.length) {
+        // Last resort: the original search's HTML fallback page, which is
+        // not limited to the suggest index.
+        const extra = [];
+        for (const q of queries) {
+            const $ = await httpGetDoc(MAIN_URL + "/?s=" + javaUrlEncode(q), {});
+            if (!$) continue;
+            $("a.dgt-card").each((i, el) => {
+                const r = cardToSearchResult($, el);
+                if (r && r.url && !seenUrls[r.url]) {
+                    seenUrls[r.url] = true;
+                    extra.push(r);
+                }
+            });
+        }
+        if (extra.length) {
+            const extraLoaded = await loadPool(extra);
+            all = all.concat(extraLoaded);
+            pool = all.filter((p) => p.isSeries === wantSeries);
+        }
+    }
+    if (!all.length) return null;
+    // A tv request must never resolve to a movie post (and vice versa):
+    // an earlier version of this selection silently fell back to the
+    // first loaded post — a same-franchise movie — so series requests
+    // played a movie. Selection is type-scoped first: TMDB-id match,
+    // then exact normalised-title match, then the first candidate of the
+    // requested type; cross-type posts are only used on an exact TMDB or
+    // title match.
+    const byTmdb = (arr) => arr.find((p) => p.l.tmdbId != null && String(p.l.tmdbId) === String(tmdbId));
+    const byTitle = (arr) => arr.find((p) => norm(p.l.title) === norm(title));
+    const pick = byTmdb(pool) || byTitle(pool) || pool[0] || byTmdb(all) || byTitle(all) || null;
+    if (pick == null) return null;
+    const chosen = pick.r;
+    const loaded = pick.l;
     if (mediaType === "movie" || loaded.postId == null || loaded.seasons.length === 0) {
         return {
             media: { url: chosen.url, poster: null, mediaType: 1, postId: loaded.postId, epId: 0 },

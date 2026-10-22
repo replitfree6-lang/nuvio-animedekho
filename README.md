@@ -109,25 +109,43 @@ behaviour so `loadExtractor()` routes exactly like CloudStream.
   `getStreams` as strings while the site's season/episode data is
   numeric; they are coerced to numbers before comparison. (Without this,
   series requests returned no streams in the app.)
+- **Type-safe title resolution** — Nuvio hands the scraper only a TMDB
+  id, and the site's suggest search can miss the series entirely (for
+  "Shin Chan" it returns only same-franchise movies; the series is
+  indexed as "Shinchan"). The resolver therefore also searches the
+  squashed title, and only ever resolves a tv request to a series post
+  and a movie request to a movie post (exact TMDB-id or title matches
+  aside). An earlier version fell back to the first loaded post, which
+  made series requests play a movie.
 - **Parallel candidate loading** — the TMDB-match scan loads candidate
-  posts in parallel instead of one page fetch at a time; the selection
-  result is identical, the runtime is much lower.
+  posts in parallel instead of one page fetch at a time, keeping the
+  runtime well within Nuvio's scraper limits.
 - **HTTP timeout** — requests time out after 12 seconds: several
   extractor hosts hang rather than refuse, and Nuvio kills scrapers that
   run too long.
-- **StreamRuby** — rubystm.com now serves its player script Dean Edwards
-  packed, so the original `file:"…"` pattern only exists after
-  unpacking; the extractor retries on the unpacked script when the plain
-  pattern finds nothing. The original pattern still runs first.
+- **StreamRuby (site drift)** — rubystm.com now serves its player script
+  Dean Edwards packed, so the original `file:"…"` pattern only exists
+  after unpacking; the extractor retries on the unpacked script when the
+  plain pattern finds nothing. The original pattern still runs first.
+- **StreamRuby (playback)** — streamruby binds its playlist token to the
+  exact User-Agent that fetched the player page (verified live: same UA
+  returns 200, any other UA returns 403). In CloudStream the scraper and
+  the player share one HTTP stack, so this never mattered; in Nuvio they
+  differ, so the page is fetched with a fixed User-Agent and the same
+  User-Agent is attached to the stream for the player.
 
 ## Validation (live, 22 Oct 2026)
 
 Tested by calling `getStreams` exactly the way Nuvio does (including with
-string season/episode arguments):
+string season/episode arguments), and by replaying the returned SRuby
+stream through a player-style fetch of its master playlist, variants and
+segments:
 
-- One Piece S1E1: 17 streams in ~26 s (NeoCDN, HydraX/Abyss, SRuby,
+- One Piece S1E1: 17 streams in ~11 s (NeoCDN, HydraX/Abyss, SRuby,
   Vidmoly, Vidstream).
-- Shinchan S1E1: 10 streams in ~20 s (NeoCDN, HydraX/Abyss, SRuby,
-  Vidmoly — the site's own source list for that episode is VidStreamm
-  [hidden by the site itself], HydraX, NeoCDN, SRuby, Vidstream).
-- Your Name (movie): 13 streams (full gate-bypass path exercised).
+- Shinchan S1E1: resolves to the actual episode (post 7422, episode
+  42934) — NeoCDN, SRuby, HydraX/Abyss, Vidstream. (The site's own source
+  list for that episode is VidStreamm [hidden by the site itself],
+  HydraX, NeoCDN, SRuby, Vidstream.) SRuby master/variant/segment
+  requests all return 200 with the stream's headers.
+- Your Name (movie): 14 streams (full gate-bypass path exercised).
