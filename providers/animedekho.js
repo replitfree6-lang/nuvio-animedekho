@@ -189,10 +189,21 @@ function unpackJs(packed) {
 }
 
 function sleep(ms) {
-    return new Promise((resolve) => {
-        if (typeof setTimeout === "function") setTimeout(resolve, ms);
-        else resolve();
-    });
+    if (typeof setTimeout === "function") {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    // Platform difference: the LG webOS TV runtime has no setTimeout at all
+    // (proven by the TV diagnostic on 2026-10-23), so resolving immediately
+    // made every ad-gate wait collapse to zero and the bypass could never
+    // pass on TV. Wait by watching the clock instead, in small slices.
+    const end = Date.now() + ms;
+    return (async () => {
+        while (Date.now() < end) {
+            const sliceEnd = Math.min(end, Date.now() + 40);
+            while (Date.now() < sliceEnd) {}
+            await Promise.resolve();
+        }
+    })();
 }
 
 // ---------------------------------------------------------------------------
@@ -1796,6 +1807,17 @@ async function verifyGate(verifyUrl) {
             cookie = m[1];
             break;
         }
+    }
+    if (cookie == null && typeof res.headers.forEach === "function") {
+        // Some TV fetch bridges hide set-cookie from get()/getSetCookie()
+        // (proven by the TV diagnostic on webOS) but still expose it when
+        // every header is iterated — scan them all as a last resort.
+        res.headers.forEach((v) => {
+            if (cookie == null) {
+                const m = /dgt_verified=([^;]+)/.exec(String(v));
+                if (m) cookie = m[1];
+            }
+        });
     }
     console.log("AnimeDekho: Gate verify code=" + res.status + " cookie=" + (cookie != null ? "ok" : "missing"));
     return cookie;

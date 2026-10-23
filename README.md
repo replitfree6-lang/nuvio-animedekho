@@ -131,6 +131,18 @@ behaviour so `loadExtractor()` routes exactly like CloudStream.
 - **HTTP timeout** — requests time out after 12 seconds: several
   extractor hosts hang rather than refuse, and Nuvio kills scrapers that
   run too long.
+- **TV runtime: no `setTimeout`** — the LG webOS build of the app has no
+  `setTimeout` function at all (proven by a diagnostic scraper run on the
+  TV itself). The ad-gate bypass has to wait between verify attempts;
+  with no timer the waits collapsed to zero and the bypass could never
+  pass on TV. `sleep()` now falls back to waiting by watching the clock,
+  in small slices. Behaviour on runtimes that do have `setTimeout`
+  (phones, desktop) is unchanged.
+- **TV runtime: hidden `Set-Cookie`** — the same TV fetch layer hides
+  `set-cookie` from both `headers.get()` and `getSetCookie()`, which is
+  where the gate's `dgt_verified` cookie lives. `verifyGate()` now also
+  scans every response header by iteration as a last resort before
+  giving up on the cookie.
 - **StreamRuby (site drift)** — rubystm.com now serves its player script
   Dean Edwards packed, so the original `file:"…"` pattern only exists
   after unpacking; the extractor retries on the unpacked script when the

@@ -22,7 +22,7 @@
         "movie",
         "tv"
       ],
-      "version": "1.0.3"
+      "version": "1.0.4"
     },
     {
       "id": "tvdiag",
@@ -57,5 +57,5 @@
       "logo": "https://animedekho.tv/favicon.ico"
     }
   ],
-  "version": "1.0.7"
+  "version": "1.0.8"
 }
