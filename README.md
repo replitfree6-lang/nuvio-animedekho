@@ -143,6 +143,15 @@ behaviour so `loadExtractor()` routes exactly like CloudStream.
   where the gate's `dgt_verified` cookie lives. `verifyGate()` now also
   scans every response header by iteration as a last resort before
   giving up on the cookie.
+- **AbyssPlayer (playback)** — a dec-abyss source URL is not the file
+  itself: it answers 302 to a rotating mirror host, and players that
+  drop custom headers across a cross-host redirect (or mishandle the
+  redirect) fail on these streams while direct-link servers play. The
+  extractor now resolves that redirect itself — on the same device/IP
+  the player will use — and emits the final URL, together with the
+  Referer and the exact User-Agent the extractor used (the same
+  identity-binding lesson as StreamRuby). If the redirect cannot be
+  resolved, the original URL is emitted unchanged.
 - **StreamRuby (site drift)** — rubystm.com now serves its player script
   Dean Edwards packed, so the original `file:"…"` pattern only exists
   after unpacking; the extractor retries on the unpacked script when the

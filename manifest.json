@@ -22,40 +22,8 @@
         "movie",
         "tv"
       ],
-      "version": "1.0.4"
-    },
-    {
-      "id": "tvdiag",
-      "name": "TV Diagnostic (temporary)",
-      "description": "Temporary diagnostic scraper v3: runs the real Anime Dekho ad-gate bypass with TV-safe waiting and cookie capture to find why TVs return no streams. Not a content provider.",
-      "version": "1.2.0",
-      "author": "Muse (diagnostic)",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "filename": "providers/tvdiag.js",
-      "enabled": true,
-      "formats": [
-        "m3u8"
-      ],
-      "contentLanguage": [
-        "en"
-      ],
-      "hasSettings": false
-    },
-    {
-      "id": "tvtrace",
-      "name": "TV Trace (temporary)",
-      "description": "Temporary trace build: runs the real Anime Dekho scraper on Shinchan S1E1 with step-by-step checkpoints to find where TVs stop. Not a content provider.",
-      "version": "1.0.0",
-      "filename": "providers/tvtrace.js",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "logo": "https://animedekho.tv/favicon.ico"
+      "version": "1.0.5"
     }
   ],
-  "version": "1.0.8"
+  "version": "1.0.9"
 }

@@ -674,10 +674,35 @@ async function abyassMain(inst, url, referer, emit, emitSub) {
         (s) => s != null && s.status && !isBlank(s.url)
     );
     for (const s of sources) {
-        emit(makeLink(inst.name, inst.name + " [" + String(s.codec).toUpperCase() + "]", s.url, "infer", {
+        // Site behaviour (found 2026-10-23): a dec-abyss source URL is not
+        // the file itself — it answers 302 to a rotating mirror host, and
+        // players that drop custom headers across a cross-host redirect
+        // (or mishandle the redirect) fail to play these streams even
+        // though the link is valid — Abyss streams failed in the app on
+        // phone and TV while direct-link servers played. Resolve the
+        // redirect here, on the same device/IP the player will use, and
+        // hand over the final URL plus the Referer and the exact
+        // User-Agent this extractor used, mirroring the StreamRuby fix.
+        let finalUrl = s.url;
+        try {
+            const rr = await httpGetRes(s.url, { headers: headers, redirect: "manual" });
+            const loc = rr && rr.status >= 300 && rr.status < 400 && typeof rr.headers.get === "function"
+                ? rr.headers.get("location") : null;
+            if (!isBlank(loc)) {
+                if (loc.startsWith("http")) {
+                    finalUrl = loc;
+                } else if (loc.startsWith("/")) {
+                    const origin = /^https?:\/\/[^/]+/.exec(s.url);
+                    if (origin) finalUrl = origin[0] + loc;
+                }
+            }
+        } catch (e) {
+            // Keep the original URL — the player may still follow it.
+        }
+        emit(makeLink(inst.name, inst.name + " [" + String(s.codec).toUpperCase() + "]", finalUrl, "infer", {
             quality: getQualityFromName(s.type),
             referer: "https://playhydrax.com/",
-            headers: { "Referer": "https://playhydrax.com/" },
+            headers: { "Referer": "https://playhydrax.com/", "User-Agent": headers["User-Agent"] },
         }));
     }
 }
