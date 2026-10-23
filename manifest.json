@@ -43,7 +43,19 @@
         "en"
       ],
       "hasSettings": false
+    },
+    {
+      "id": "tvtrace",
+      "name": "TV Trace (temporary)",
+      "description": "Temporary trace build: runs the real Anime Dekho scraper on Shinchan S1E1 with step-by-step checkpoints to find where TVs stop. Not a content provider.",
+      "version": "1.0.0",
+      "filename": "providers/tvtrace.js",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "logo": "https://animedekho.tv/favicon.ico"
     }
   ],
-  "version": "1.0.6"
+  "version": "1.0.7"
 }
